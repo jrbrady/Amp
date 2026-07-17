@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Particle Flow</title>
+<style>
+* { margin: 0; padding: 0; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: transparent; }
+canvas { display: block; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+function resize() {
+  canvas.width  = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// Layout constants — proportional to canvas size
+function W() { return canvas.width; }
+function H() { return canvas.height; }
+
+const STREAMS = [
+  { yOff: -0.42 },
+  { yOff: -0.20 },
+  { yOff:  0.00 },
+  { yOff: +0.20 },
+  { yOff: +0.42 },
+];
+
+function lerpColor(xp) {
+  if (xp < 0.45) return [216, 90, 48];
+  if (xp < 0.60) {
+    const t = (xp - 0.45) / 0.15;
+    return [Math.round(216+(166-216)*t), Math.round(90+(125-90)*t), Math.round(48+(212-48)*t)];
+  }
+  if (xp < 0.68) return [166, 125, 212];
+  if (xp < 0.80) {
+    const t = (xp - 0.68) / 0.12;
+    return [Math.round(166+(74-166)*t), Math.round(125+(163-125)*t), Math.round(212+(232-212)*t)];
+  }
+  return [74, 163, 232];
+}
+
+function getY(stream, xp, wa, wf, wp) {
+  const cy = H() * 0.50;
+  const sh = H() * 0.52;
+  let laneBlend, wobbleBlend;
+  if (xp < 0.20) {
+    laneBlend = 1.0; wobbleBlend = 1.0;
+  } else if (xp < 0.80) {
+    const t = (xp - 0.20) / 0.60;
+    laneBlend = 1.0 - t * 0.65; wobbleBlend = 1.0;
+  } else if (xp < 0.95) {
+    const t = (xp - 0.80) / 0.15;
+    laneBlend = 0.35 * (1.0 - t); wobbleBlend = 1.0 - t;
+  } else {
+    laneBlend = 0.0; wobbleBlend = 0.0;
+  }
+  return cy
+    + stream.yOff * sh * 0.5 * laneBlend
+    + wa * Math.sin(xp * wf * Math.PI + wp) * wobbleBlend;
+}
+
+function survivalOpacity(p, xp) {
+  if (xp < 0.20 || p.fate === 1.0) return 1.0;
+  if (xp < p.fate) return 1.0;
+  if (xp < p.fate + 0.10) return 1.0 - (xp - p.fate) / 0.10;
+  return 0.0;
+}
+
+let seed = 42;
+function rng() { seed = Math.sin(seed) * 10000; return seed - Math.floor(seed); }
+
+const parts = [];
+for (let i = 0; i < 130; i++) {
+  const stream = STREAMS[Math.floor(rng() * STREAMS.length)];
+  const outer = Math.abs(stream.yOff);
+  const fate = rng() < (0.55 - outer * 0.55) ? 1.0 : 0.20 + rng() * (0.60 * (1 - outer * 0.6));
+  parts.push({
+    stream, fate,
+    dur: 0.60 + rng() * 0.32,
+    off: rng(),
+    size: 3 + rng() * 5.5,
+    op:   0.65 + rng() * 0.35,
+    wa:   2.0  + rng() * 6.0,
+    wf:   0.6  + rng() * 1.4,
+    wp:   rng() * Math.PI * 2,
+  });
+}
+
+const LOOP_MS = 5000;
+
+function draw(ts) {
+  const t = (ts % LOOP_MS) / LOOP_MS;
+  const w = W(), h = H();
+  const xStart = w * 0.05;
+  const xEnd   = w * 0.83;
+
+  ctx.clearRect(0, 0, w, h);
+
+  for (const p of parts) {
+    const tl = (t - p.off + 1) % 1;
+    const xp = tl / p.dur;
+    if (xp > 1) continue;
+
+    const x = xStart + xp * (xEnd - xStart);
+    const y = getY(p.stream, xp, p.wa * (h / 720), p.wf, p.wp);
+
+    let fade = p.op;
+    if (xp < 0.05) fade *= xp / 0.05;
+    else if (xp > 0.90) fade *= (1 - xp) / 0.10;
+    fade *= survivalOpacity(p, xp);
+    if (fade < 0.02) continue;
+
+    const [r, g, b] = lerpColor(xp);
+    const s = p.size * (h / 720);
+
+    // Subtle glow
+    const glow = s * 1.8;
+    const grd = ctx.createRadialGradient(x, y, 0, x, y, glow);
+    grd.addColorStop(0, `rgba(${r},${g},${b},${(fade*0.28).toFixed(2)})`);
+    grd.addColorStop(1, `rgba(${r},${g},${b},0)`);
+    ctx.beginPath(); ctx.arc(x, y, glow, 0, Math.PI*2);
+    ctx.fillStyle = grd; ctx.fill();
+
+    // Core
+    ctx.beginPath(); ctx.arc(x, y, s, 0, Math.PI*2);
+    ctx.fillStyle = `rgba(${r},${g},${b},${fade.toFixed(2)})`; ctx.fill();
+  }
+
+  requestAnimationFrame(draw);
+}
+
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>
